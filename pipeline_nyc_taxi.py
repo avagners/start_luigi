@@ -1,8 +1,12 @@
 import requests
 import luigi
 import os
+
 import pandas as pd
 from typing import List
+from luigi.contrib.sqla import CopyToTable
+from luigi.util import requires
+from sqlalchemy import Numeric, Date
 
 
 def download_dataset(filename: str) -> requests.Response:
@@ -70,5 +74,27 @@ class AggregateTaxiTripTask(luigi.Task):
         )
 
 
+@requires(AggregateTaxiTripTask)
+class CopyTaxiTripData2SQLite(CopyToTable):
+    # year = IntParameter()
+    # month = IntParameter()
+
+    table = 'nyc_trip_agg_data'
+    connection_string = 'sqlite:///sqlite.db'
+
+    columns = [
+        (['pickup_date', Date()], {}),
+        (['tip_amount', Numeric(2)], {}),
+        (['total_amount', Numeric(2)], {}),
+    ]
+
+    def rows(self):
+        with self.input().open() as csv_file:
+            # use pandas not to deal with type conversions
+            df = pd.read_csv(csv_file, parse_dates=['pickup_date'])
+            rows = df.to_dict(orient='split')['data']
+            return rows
+
+
 if __name__ == '__main__':
-    luigi.build([AggregateTaxiTripTask(year=2020, month=11)], local_scheduler=True)
+    luigi.build([CopyTaxiTripData2SQLite(year=2020, month=11)], local_scheduler=True)
