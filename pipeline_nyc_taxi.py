@@ -1,12 +1,13 @@
 import requests
 import luigi
 import os
-
+import datetime
 import pandas as pd
 from typing import List
 from luigi.contrib.sqla import CopyToTable
 from luigi.util import requires
 from sqlalchemy import Numeric, Date
+from dateutil.relativedelta import relativedelta
 
 
 def download_dataset(filename: str) -> requests.Response:
@@ -21,12 +22,11 @@ def get_filename(year: int, month: int) -> str:
 
 
 class DownloadTaxiTripTask(luigi.Task):
-    year = luigi.IntParameter()
-    month = luigi.IntParameter()
+    date = luigi.MonthParameter()
 
     @property
     def filename(self):
-        return get_filename(self.year, self.month)
+        return get_filename(self.date.year, self.date.month)
 
     def run(self):
 
@@ -54,12 +54,9 @@ def group_by_pickup_date(
     return df
 
 
+@requires(DownloadTaxiTripTask)
 class AggregateTaxiTripTask(luigi.Task):
-    year = luigi.IntParameter()
-    month = luigi.IntParameter()
-
-    def requires(self):
-        return DownloadTaxiTripTask(year=self.year, month=self.month)
+    date = luigi.MonthParameter()
 
     def run(self):
         with self.input().open() as input, self.output().open('w') as output:
@@ -68,7 +65,7 @@ class AggregateTaxiTripTask(luigi.Task):
             df.to_csv(output.name, index=False)
 
     def output(self):
-        filename = get_filename(self.year, self.month)[:-4]
+        filename = get_filename(self.date.year, self.date.month)[:-4]
         return luigi.LocalTarget(
             os.path.join('yellow-taxi-data', f'{filename}-agg.csv')
         )
@@ -76,8 +73,6 @@ class AggregateTaxiTripTask(luigi.Task):
 
 @requires(AggregateTaxiTripTask)
 class CopyTaxiTripData2SQLite(CopyToTable):
-    # year = IntParameter()
-    # month = IntParameter()
 
     table = 'nyc_trip_agg_data'
     connection_string = 'sqlite:///sqlite.db'
@@ -96,5 +91,16 @@ class CopyTaxiTripData2SQLite(CopyToTable):
             return rows
 
 
+class YellowTaxiDateRangeTask(luigi.WrapperTask):
+    start = luigi.MonthParameter()
+    stop = luigi.MonthParameter()
+
+    def requires(self):
+        current_month = self.start
+        while current_month <= self.stop:
+            yield CopyTaxiTripData2SQLite(date=current_month)
+            current_month += relativedelta(months=1)
+
+
 if __name__ == '__main__':
-    luigi.build([CopyTaxiTripData2SQLite(year=2020, month=11)], local_scheduler=True)
+    luigi.build([YellowTaxiDateRangeTask(start=datetime.date(2020, 6, 1), stop=datetime.date(2020, 12, 1))], workers=3)
