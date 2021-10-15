@@ -1,3 +1,5 @@
 .idea
 yellow-taxi-data
 sqlite.db
+__pycache__
+tasks/__pycache__
