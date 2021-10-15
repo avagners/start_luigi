@@ -10,3 +10,5 @@ class FailureTask(Task):
 if __name__ == '__main__':
     luigi.build([FailureTask()])
 
+#  python -m luigi --module tasks.failure_task FailureTask
+
